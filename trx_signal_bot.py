@@ -75,7 +75,7 @@ def run_signal_engine():
                 df = calculate_indicators(candles)
                 
                 # Get the latest completed data state
-                latest_row = df.iloc[-1]
+                latest_row = df.iloc[-2]
                 current_price = latest_row['close']
                 current_rsi = latest_row['rsi']
                 current_ema = latest_row['ema200']
