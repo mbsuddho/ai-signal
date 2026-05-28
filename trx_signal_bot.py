@@ -1,102 +1,126 @@
-import ccxt
-import requests
 import time
-from datetime import datetime
+import requests
+import ccxt
+import pandas as pd
+from flask import Flask
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# --- 1. LIVE WEB SERVER TRICK FOR RENDER ---
-class SimpleWebServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"Bot is alive and scanning TRX/USDT!")
+# --- 1. TELEGRAM CONFIGURATION ---
+TELEGRAM_BOT_TOKEN = "8943651714:AAHOlFMDZODtTjcW-4fws7vu5_Sm_YHIea0"  # Keep your real token here
+TELEGRAM_CHAT_ID = "@suddhosignal"      # Keep your real chat ID here
 
-def run_web_server():
-    # Render automatically looks for port 10000 on web services
-    server = HTTPServer(('0.0.0.0', 10000), SimpleWebServer)
-    print("🌍 Web Server running on port 10000 (Keeping Render Awake)")
-    server.serve_forever()
+# --- 2. MULTI-COIN SETUP ---
+WATCH_SYMBOLS = ['TRX/USDT', 'DOGE/USDT', 'XRP/USDT', 'ADA/USDT']
+TIMEFRAME = '15m'  # 15-minute candles offer stable indicators
 
-# --- 2. CONFIGURATION ---
-# Force CCXT to pull directly from the Binance USDS-M Perpetual Futures market
-exchange = ccxt.binance({
-    'options': {'defaultType': 'future'}, 
-    'enableRateLimit': True
-})
-TELEGRAM_BOT_TOKEN = '8943651714:AAHOlFMDZODtTjcW-4fws7vu5_Sm_YHIea0'
-TELEGRAM_CHAT_ID = '@suddhosignal'
-SYMBOL = 'TRX/USDT'
-SIGNAL_THRESHOLD_PERCENT = 0.5
-TAKE_PROFIT_PERCENT = 1.0       
-STOP_LOSS_PERCENT = 0.5         
-CHECK_INTERVAL_SECONDS = 5      
+# --- 3. INDICATOR MATH FUNCTIONS ---
+def calculate_indicators(candles):
+    """Converts raw candle data into a dataframe with 200 EMA and RSI."""
+    df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['close'] = df['close'].astype(float)
+    
+    # Calculate 200 EMA
+    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+    
+    # Calculate 14-period RSI
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / (loss + 1e-10)  # Avoid division by zero
+    df['rsi'] = 100 - (100 / (1 + rs))
+    
+    return df
 
-# --- 3. TELEGRAM SIGNAL CARDS ---
-def send_telegram_signal(symbol, entry_price, direction):
-    time_str = datetime.utcnow().strftime('%H:%M (UTC)')
-    if direction == "LONG":
-        action_title = "🚀 AI AGENT: TRX/USDT LONG SIGNAL 🚀"
-        tp_price = entry_price * (1 + (TAKE_PROFIT_PERCENT / 100))
-        sl_price = entry_price * (1 - (STOP_LOSS_PERCENT / 100))
-    else:
-        action_title = "💥 AI AGENT: TRX/USDT SHORT SIGNAL 💥"
-        tp_price = entry_price * (1 - (TAKE_PROFIT_PERCENT / 100))
-        sl_price = entry_price * (1 + (STOP_LOSS_PERCENT / 100))
-
+def send_telegram_signal(symbol, side, entry, tp, sl, rsi, ema):
+    """Sends a formatted indicator confirmation card to Telegram."""
+    emoji = "🟢 LONG" if side == "LONG" else "🔴 SHORT"
+    rocket = "🚀" if side == "LONG" else "💥"
+    
     message = (
-        f"{action_title}\n\n"
-        f"💱 **Trading Pair:** {symbol}\n"
-        f"📥 **Entry Price:** ${entry_price:.5f}\n"
-        f"🎯 **Take Profit Target:** ${tp_price:.5f} (+1.0%)\n"
-        f"🛡️ **Stop Loss Safety:** ${sl_price:.5f} (-0.5%)\n"
+        f"{rocket} **AI AGENT: {symbol} {emoji} SIGNAL** {rocket}\n\n"
+        f"📊 **Trend Filter:** Price {'Above' if entry > ema else 'Below'} 200 EMA\n"
+        f"⏱️ **RSI Level:** {round(rsi, 2)}\n"
+        f"----------------------------------------\n"
+        f"💸 **Entry Price:** ${entry}\n"
+        f"🎯 **Take Profit Target (1.0%):** ${round(tp, 5)}\n"
+        f"🛡️ **Stop Loss Safety (0.5%):** ${round(sl, 5)}\n"
     )
+    
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
         requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"})
-        return tp_price, sl_price
     except Exception as e:
-        print(f"⚠️ Telegram error: {e}")
-        return None, None
+        print(f"Telegram network glitch: {e}")
 
-# --- 4. ENGINE CORE ---
+# --- 4. THE LIVE CORE ENGINE ---
 def run_signal_engine():
-    print(f"📡 Scanning {SYMBOL} order books...")
-    ticker = exchange.fetch_ticker(SYMBOL)
-    last_anchor_price = ticker['last']
-    active_tp, active_sl, active_direction = None, None, None
-
+    print("Initializing Binance Futures Connection...")
+    exchange = ccxt.binance({
+        'options': {'defaultType': 'future'},
+        'enableRateLimit': True
+    })
+    
+    # Track states to avoid spamming multiple signals on the exact same candle
+    last_signal_time = {symbol: 0 for symbol in WATCH_SYMBOLS}
+    
+    print("Multi-Coin Indicator Engine is active and scanning...")
     while True:
-        try:
-            ticker = exchange.fetch_ticker(SYMBOL)
-            current_price = ticker['last']
-            
-            if active_tp is not None:
-                if active_direction == "LONG":
-                    if current_price >= active_tp:
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": "✅ **TRX/USDT TAKE PROFIT HIT!** 💰"})
-                        active_tp, active_sl, active_direction = None, None, None
-                    elif current_price <= active_sl:
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": TELEGRAM_CHAT_ID, "text": "❌ **TRX/USDT STOP LOSS HIT.** 🛡️"})
-                        active_tp, active_sl, active_direction = None, None, None
-            else:
-                price_change = ((current_price - last_anchor_price) / last_anchor_price) * 100
-                if price_change <= -SIGNAL_THRESHOLD_PERCENT:
-                    active_tp, active_sl = send_telegram_signal(SYMBOL, current_price, "LONG")
-                    active_direction = "LONG"
-                    last_anchor_price = current_price
-                elif price_change >= SIGNAL_THRESHOLD_PERCENT:
-                    active_tp, active_sl = send_telegram_signal(SYMBOL, current_price, "SHORT")
-                    active_direction = "SHORT"
-                    last_anchor_price = current_price
+        for symbol in WATCH_SYMBOLS:
+            try:
+                # Fetch recent historical charts
+                candles = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=250)
+                if len(candles) < 200:
+                    continue
+                    
+                df = calculate_indicators(candles)
+                
+                # Get the latest completed data state
+                latest_row = df.iloc[-1]
+                current_price = latest_row['close']
+                current_rsi = latest_row['rsi']
+                current_ema = latest_row['ema200']
+                timestamp = latest_row['timestamp']
+                
+                # Check if we already handled this specific candle
+                if timestamp == last_signal_time[symbol]:
+                    continue
+                
+                # 🛑 STRATEGY RULES:
+                # 1. LONG Rule: Price must be in macro uptrend (Price > EMA) and micro oversold (RSI < 35)
+                if current_price > current_ema and current_rsi < 35:
+                    tp = current_price * 1.01
+                    sl = current_price * 0.995
+                    send_telegram_signal(symbol, "LONG", current_price, tp, sl, current_rsi, current_ema)
+                    last_signal_time[symbol] = timestamp
+                    
+                # 2. SHORT Rule: Price must be in macro downtrend (Price < EMA) and micro overbought (RSI > 65)
+                elif current_price < current_ema and current_rsi > 65:
+                    tp = current_price * 0.99
+                    sl = current_price * 1.005
+                    send_telegram_signal(symbol, "SHORT", current_price, tp, sl, current_rsi, current_ema)
+                    last_signal_time[symbol] = timestamp
+                    
+            except Exception as e:
+                print(f"Error checking {symbol}: {e}")
+                
+        time.sleep(15)  # Check the group of tickers every 15 seconds safely
 
-            time.sleep(CHECK_INTERVAL_SECONDS)
-        except Exception as e:
-            time.sleep(10)
+# --- 5. RENDER WEB SERVER HOOK ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Multi-Coin RSI/EMA Intelligence Core is Alive!"
+
+def run_web_server():
+    app.run(host='0.0.0.0', port=10000)
 
 if __name__ == "__main__":
-    # Start the web server thread so Render stays happy
-    threading.Thread(target=run_web_server, daemon=True).start()
-    # Start the crypto scanning engine
-    run_signal_engine()
+    # Fire up the background scanner thread
+    t = threading.Thread(target=run_signal_engine)
+    t.daemon = True
+    t.start()
+    
+    # Fire up the main web server thread for Render/Cron-job
+    run_web_server()
+    
