@@ -20,7 +20,11 @@ def run_web_server():
     server.serve_forever()
 
 # --- 2. CONFIGURATION ---
-exchange = ccxt.binance({'enableRateLimit': True})
+# Force CCXT to pull directly from the Binance USDS-M Perpetual Futures market
+exchange = ccxt.binance({
+    'options': {'defaultType': 'future'}, 
+    'enableRateLimit': True
+})
 TELEGRAM_BOT_TOKEN = '8943651714:AAHOlFMDZODtTjcW-4fws7vu5_Sm_YHIea0'
 TELEGRAM_CHAT_ID = '@suddhosignal'
 SYMBOL = 'TRX/USDT'
