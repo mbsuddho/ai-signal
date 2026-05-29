@@ -9,9 +9,13 @@ import threading
 TELEGRAM_BOT_TOKEN = "8943651714:AAHOlFMDZODtTjcW-4fws7vu5_Sm_YHIea0"
 TELEGRAM_CHAT_ID = "@suddhosignal"
 
-# --- 2. MULTI-COIN CONFIGURATION ---
-WATCH_SYMBOLS = ['TRX/USDT', 'DOGE/USDT', 'XRP/USDT', 'ADA/USDT']
-TIMEFRAME = '15m'
+# --- 2. EXPANDED HIGH-VOLUME COIN CONFIGURATION ---
+WATCH_SYMBOLS = [
+    'TRX/USDT', 'DOGE/USDT', 'XRP/USDT', 'ADA/USDT',
+    'SOL/USDT', 'MATIC/USDT', 'LINK/USDT', 'OP/USDT', 
+    'NEAR/USDT', 'AVAX/USDT', 'APT/USDT', 'SUI/USDT'
+]
+TIMEFRAME = '5m'  # Dropped to 5 minutes for faster indicators and quicker entries
 
 # Track active live trades to monitor TP/SL and prevent double trades
 active_trades = {symbol: None for symbol in WATCH_SYMBOLS} 
@@ -48,7 +52,7 @@ def run_signal_engine():
         'enableRateLimit': True
     })
     
-    print("Market-Ready Engine is active and scanning...")
+    print("High-Frequency Reversal Engine is active and scanning...")
     while True:
         for symbol in WATCH_SYMBOLS:
             try:
@@ -84,8 +88,8 @@ def run_signal_engine():
                 df = calculate_indicators(candles)
                 
                 # Get the last two completed candles to check for a crossover hook
-                previous_row = df.iloc[-3]  # The candle before last
-                latest_closed_row = df.iloc[-2]  # The most recently finished candle
+                previous_row = df.iloc[-3]  
+                latest_closed_row = df.iloc[-2]  
                 
                 current_price = float(latest_closed_row['close'])
                 current_ema = latest_closed_row['ema200']
@@ -103,7 +107,7 @@ def run_signal_engine():
                     msg = (
                         f"🟢 **AI AGENT: {symbol} MARKET READY (LONG)** 🚀\n\n"
                         f"📊 **Trend Filter:** Safely Above 200 EMA\n"
-                        f"🔄 **Momentum Hook:** RSI crossed back UP from {round(rsi_prev,1)} to {round(rsi_now,1)}\n"
+                        f"🔄 **Momentum Hook:** 5m RSI crossed UP from {round(rsi_prev,1)} to {round(rsi_now,1)}\n"
                         f"----------------------------------------\n"
                         f"📥 **Entry Price:** ${current_price}\n"
                         f"🎯 **Take Profit (1.0%):** ${round(tp_target, 5)}\n"
@@ -120,7 +124,7 @@ def run_signal_engine():
                     msg = (
                         f"🔴 **AI AGENT: {symbol} MARKET READY (SHORT)** 💥\n\n"
                         f"📊 **Trend Filter:** Safely Below 200 EMA\n"
-                        f"🔄 **Momentum Hook:** RSI crossed back DOWN from {round(rsi_prev,1)} to {round(rsi_now,1)}\n"
+                        f"🔄 **Momentum Hook:** 5m RSI crossed back DOWN from {round(rsi_prev,1)} to {round(rsi_now,1)}\n"
                         f"----------------------------------------\n"
                         f"📥 **Entry Price:** ${current_price}\n"
                         f"🎯 **Take Profit (1.0%):** ${round(tp_target, 5)}\n"
@@ -132,14 +136,14 @@ def run_signal_engine():
             except Exception as e:
                 print(f"Error looping {symbol}: {e}")
                 
-        time.sleep(5)  # Constantly check prices every 5 seconds
+        time.sleep(3)  # Loop faster (every 3 seconds) since we have more coins to cover
 
 # --- 5. RENDER SYSTEM PORT HOOK ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Multi-Coin Reversal Core is Online!"
+    return "Multi-Coin High-Frequency Core is Online!"
 
 def run_web_server():
     app.run(host='0.0.0.0', port=10000)
@@ -150,93 +154,3 @@ if __name__ == "__main__":
     t.start()
     
     run_web_server()
-    rocket = "🚀" if side == "LONG" else "💥"
-    
-    message = (
-        f"{rocket} **AI AGENT: {symbol} {emoji} SIGNAL** {rocket}\n\n"
-        f"📊 **Trend Filter:** Price {'Above' if entry > ema else 'Below'} 200 EMA\n"
-        f"⏱️ **RSI Level:** {round(rsi, 2)}\n"
-        f"----------------------------------------\n"
-        f"💸 **Entry Price:** ${entry}\n"
-        f"🎯 **Take Profit Target (1.0%):** ${round(tp, 5)}\n"
-        f"🛡️ **Stop Loss Safety (0.5%):** ${round(sl, 5)}\n"
-    )
-    
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"})
-    except Exception as e:
-        print(f"Telegram network glitch: {e}")
-
-# --- 4. THE LIVE CORE ENGINE ---
-def run_signal_engine():
-    print("Initializing Binance Futures Connection...")
-    exchange = ccxt.binance({
-        'options': {'defaultType': 'future'},
-        'enableRateLimit': True
-    })
-    
-    # Track states to avoid spamming multiple signals on the exact same candle
-    last_signal_time = {symbol: 0 for symbol in WATCH_SYMBOLS}
-    
-    print("Multi-Coin Indicator Engine is active and scanning...")
-    while True:
-        for symbol in WATCH_SYMBOLS:
-            try:
-                # Fetch recent historical charts
-                candles = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=250)
-                if len(candles) < 200:
-                    continue
-                    
-                df = calculate_indicators(candles)
-                
-                # Get the latest completed data state
-                latest_row = df.iloc[-2]
-                current_price = latest_row['close']
-                current_rsi = latest_row['rsi']
-                current_ema = latest_row['ema200']
-                timestamp = latest_row['timestamp']
-                
-                # Check if we already handled this specific candle
-                if timestamp == last_signal_time[symbol]:
-                    continue
-                
-                # 🛑 STRATEGY RULES:
-                # 1. LONG Rule: Price must be in macro uptrend (Price > EMA) and micro oversold (RSI < 35)
-                if current_price > current_ema and current_rsi < 35:
-                    tp = current_price * 1.01
-                    sl = current_price * 0.995
-                    send_telegram_signal(symbol, "LONG", current_price, tp, sl, current_rsi, current_ema)
-                    last_signal_time[symbol] = timestamp
-                    
-                # 2. SHORT Rule: Price must be in macro downtrend (Price < EMA) and micro overbought (RSI > 65)
-                elif current_price < current_ema and current_rsi > 65:
-                    tp = current_price * 0.99
-                    sl = current_price * 1.005
-                    send_telegram_signal(symbol, "SHORT", current_price, tp, sl, current_rsi, current_ema)
-                    last_signal_time[symbol] = timestamp
-                    
-            except Exception as e:
-                print(f"Error checking {symbol}: {e}")
-                
-        time.sleep(15)  # Check the group of tickers every 15 seconds safely
-
-# --- 5. RENDER WEB SERVER HOOK ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Multi-Coin RSI/EMA Intelligence Core is Alive!"
-
-def run_web_server():
-    app.run(host='0.0.0.0', port=10000)
-
-if __name__ == "__main__":
-    # Fire up the background scanner thread
-    t = threading.Thread(target=run_signal_engine)
-    t.daemon = True
-    t.start()
-    
-    # Fire up the main web server thread for Render/Cron-job
-    run_web_server()
-    
