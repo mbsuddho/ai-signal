@@ -15,7 +15,7 @@ WATCH_SYMBOLS = [
     'SOL/USDT', 'MATIC/USDT', 'LINK/USDT', 'OP/USDT', 
     'NEAR/USDT', 'AVAX/USDT', 'APT/USDT', 'SUI/USDT'
 ]
-TIMEFRAME = '5m'  # Dropped to 5 minutes for faster indicators and quicker entries
+TIMEFRAME = '15m'  # Dropped to 5 minutes for faster indicators and quicker entries
 
 # Track active live trades to monitor TP/SL and prevent double trades
 active_trades = {symbol: None for symbol in WATCH_SYMBOLS} 
